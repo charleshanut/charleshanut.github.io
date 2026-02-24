@@ -1,1 +1,224 @@
 # charleshanut.github.io
+
+---
+title: "HanProject1"
+author: "Charles Han"
+date: "2025-10-07"
+output:
+  html_document:
+    toc: true
+    toc_depth: 5
+    toc_float: true
+  pdf_document:
+    toc: true
+    toc_depth: '5'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Introduction
+
+The data I will analyze comes from two datasets. The first one is regarding the physical fitness levels of students throughout different counties in California. The database is from [data.gov](https://catalog.data.gov/dataset/percentage-of-physically-fit-students-lghc-indicator-9b191?) and is free to access for the public. Students in California are required to take a 6-part physical exam called the [FITNESSGRAM](https://www.fitnessgram.net/) test. The distribution of students who scored 6/6 are recorded between [race]{style="color:red"}, [gender]{style="color:red"}, [county]{style="color:red"}, and [grade level]{style="color:red"}.
+
+![](https://cdn.prod.website-files.com/62cc5493bad4821d71779067/6398e255188f935f99a90705_FitnessGram-Remix.jpg) [Image is taken from [Texas Tech University Health Sciences Center](https://www.cooperinstitute.org/news/fitnessgram-pacer-test-remixes).]{style="font-size:12px; color:gray;"}
+
+The second dataset I will analyze is of the average [temperature]{style="color:red"} and [precipitation]{style="color:red"} of each county in California in 2019. I scraped the dataset from the [National Centers for Environmental Information](https://www.ncei.noaa.gov/access/monitoring/climate-at-a-glance/county/mapping) website because the .csv download they provide is formatted poorly for my use.
+
+### Research Questions
+
+I will try to determine:
+
+#### 1. Whether weather (both [temperature]{style="color:red"} and [precipitation]{style="color:red"}) in each [county]{style="color:red"} will affect students' physical fitness scores.
+
+#### 2. Whether there is a difference in physical fitness between different [grade]{style="color:red"} levels.
+
+# 2. Data Preparation
+
+```{r, include = FALSE}
+# Avg Temp is degrees F, Precipitation is inches
+# Here are all the libraries needed for my project
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(stringr)
+library(knitr)
+fullFit <- read_csv("physicalFitness.csv") # This is the first file to import, it is in the github
+fit2019 <- filter(fullFit, fullFit$'Year' == "2018-2019") # Selecting only the variables/observations that are important
+fit <- filter(fit2019, fit2019$'Strata Name'=="White")
+fit <- select(fit, Geography:Percent)
+weather <- read_csv("2019weather.csv") # Here is the second file to import
+weather <- mutate(weather, County = str_sub(County, 1, -8)) # Below code is to join the two imported files together
+allData <- full_join(weather, fit, by=c("County"="Geography"))
+allData <- filter(allData, !is.na(Precipitation))
+allData <- filter(allData, !is.na(Percent)) # one of the schools had 0 people in the ninth grade
+allData <- mutate(allData, `Avg Temp` = as.numeric(str_sub(`Avg Temp`, 1, -3)))
+allData <- mutate(allData, Precipitation = as.numeric(str_sub(Precipitation, 1, -3)))
+tempMean = mean(allData$`Avg Temp`)
+precipMean = mean(allData$Precipitation)
+allData <- mutate(allData, "wetCounty" = (Precipitation>precipMean)) # Creating two new variables for analysis purposes
+allData <- mutate(allData, "coldCounty" = (`Avg Temp`<tempMean))
+```
+
+#### Filter the fitness data.
+
+Out of the original 37236 observations across different years, race/gender, counties, and grades, I only selected results from white students in the 2018-2019 school year to analyze.
+
+#### Join fitness and weather data.
+
+The [County]{style="color:red"} column in my weather dataset included the word "County" at the end, while it didn't in my fitness dataset. Therefore, I had to parse the string and trim the 8 characters from the end (6 letters from "County" + 2 spaces).
+
+#### Join and remove NA values
+
+I matched the two datasets by [County]{style="color:red"} and performed a full join. I then removed any observations that were missing variables. This included two locations in the fitness dataset that were missing weather observations (the entire state of California, as well as "Ca Education Authority" which had 1 student) and also one observation from a county that had 0 people who took the test.
+
+#### Trim weather observations
+
+Both the precipitation and temperature values included the unit causing each value to be a string. The preferred format is numeric so we can perform statistical analyses. To resolve this, I parsed each string value, trimmed the units from the end, and cast the value as numeric.
+
+#### Create categorical variables for analysis
+
+I want a way to look at relative precipitation and temperature so I created two new variables [wetCounty]{style="color:red"} and [coldCounty]{style="color:red"}. They will respectively evaluate to true if the county has higher precipitation than average, and true if the county has lower average temperature than average.
+
+#### Challenges
+
+One of the earliest challenges I faced was that some variable names included a space. I tried using quotes, double quotes, and parentheses to try and group the entire name, but neither of them worked. It turns out backtick (\`) is used for this purpose.
+
+# 3. Variable Descriptions
+
+```{r, echo=FALSE}
+# Manually creating a tibble to store variable names and descriptions.
+variableTable <- tibble(
+  Variable = c("**Type**","**Description**"),
+  County = c("Categorical","The county in California where the students\' tests were taken"),
+  `Avg Temp` = c("Numerical", "The average temperature of the county from August to June (the school year) during 2018-2019"),
+  Precipitation = c("Numerical", "The total amount of rainfall in inches from August to June 2018-2019"),
+  `Grade Lev` = c("Categorical", "The grade level of the students tested"),
+  Numerator = c("Numerical", "The number of students who scored 6/6 on the FITNESSGRAM test"),
+  Denominator = c("Numerical", "The total number of students who took the test"),
+  Percent = c("Numerical", "The percent of students who passed the test"),
+  wetCounty = c("Categorical", "Whether the county has higher precipitation than average"),
+  coldCounty = c("Categorical", "Whether the county has lower avg temperature than average")
+  
+
+)
+kable(variableTable) # Changing it into a kable to make it look nice
+  
+
+```
+
+# 4. Univariate Analyses
+
+#### Average Temperature
+
+```{r, echo = FALSE}
+# histogram for Avg Temp
+ggplot(allData, aes(x=`Avg Temp`)) + geom_histogram(aes(fill=after_stat(x)), binwidth=2, color="black") + scale_fill_gradientn(colors = c("blue", "yellow", "red"), guide = "none") + theme_classic() + labs(title="Average Temperature per County August 2018 - June 2019", y="Frequency", x="Temperature (°F)") + scale_x_continuous(breaks = seq(0,80,by=5))
+```
+
+The mean [average temperature]{style="color:red"} from August-June of California counties was `r round(mean(allData[["Avg Temp"]]),2)` degrees Fahrenheit. The standard deviation was `r round(sd(allData[["Avg Temp"]]), 2)` and [temperatures]{style="color:red"} ranged from 40.4 degrees Fahrenheit in Alpine County to 69.7 degrees Fahrenheit in Imperial County.
+
+#### Average Precipitation
+
+```{r, echo = FALSE}
+# Histogram for Precipitation
+ggplot(allData, aes(x=Precipitation)) + geom_histogram(aes(fill=after_stat(x)), binwidth=2.5, color="black") + scale_fill_gradientn(colors=c("tan", "yellow", "lightblue", "skyblue"), guide = "none") + theme_classic() + labs(title="Total Precipitation per County August 2018 - June 2019", y="Frequency", x="Precipitation (in.)") + scale_x_continuous(breaks = seq(0,80,by=5))
+```
+
+The median total [precipitation]{style="color:red"} from August-June of California counties was `r median(allData$Precipitation)` inches of rain. The IQR was `r IQR(allData$Precipitation)` and [precipitation]{style="color:red"} ranged from 0.28 inches in Imperial county to 56.35 inches Del Norte county.
+
+#### County Size
+
+```{r, fig.height = 2, echo = FALSE}
+# Boxplot for number of students
+ggplot(allData, (aes(x=`Denominator`))) + geom_boxplot() + theme_classic() + labs(title="        Number of Students who Took the FITNESSGRAM Test in a Grade", x="Number of Students in Grade") + scale_x_continuous(breaks = seq(0,20000,by=2500)) + theme(axis.text.y=element_blank(), axis.ticks.y=element_blank()) + theme(aspect.ratio = .2)
+```
+
+The median [number of students]{style="color:red"} who took the FITNESSGRAM test per grade was `r median(allData$Denominator)` students. The IQR was `r IQR(allData$Denominator)` and the [number of students]{style="color:red"} per grade ranged from 4 students in Alpine County's 7th grade to 15588 students in Los Angeles' grade 5 class.
+
+#### Pass Rate
+
+```{r, echo = FALSE}
+# Histogram for pass rate
+ggplot(allData, aes(x=Percent)) + geom_histogram(aes(fill=after_stat(x)), binwidth=2.5, color="black") + scale_fill_gradientn(colors = c("red", "yellow", "darkgreen"), guide = "none") + theme_classic() + labs(title="Pass Rate of FITNESSGRAM Test", y="Frequency", x="Pass %") + scale_x_continuous(breaks = seq(0,100,by=10))
+```
+
+The mean [pass rate]{style="color:red"} was `r round(mean(allData$Percent),2)`%. The standard deviation was `r round(sd(allData$Percent), 2)`% and [pass rates]{style="color:red"} ranged from 0.0% in Alpine County's fifth grade to 58.62% in Mono County's 7th grade.
+
+#### Grade Level
+
+```{r, echo = FALSE}
+# Bar chart for grade levels
+ggplot(allData, aes(x=`Grade Lev`, col=`Grade Lev`)) + geom_bar(fill=c("pink", "lightgreen","lightblue")) + theme_classic() + labs(title="Grade Levels Tested", y="Frequency", x="Grade Level") + coord_cartesian(ylim = c(50,60)) + scale_y_continuous(breaks = seq(50,60,by=2)) + theme(legend.position = "none")
+```
+
+All [grades]{style="color:red"} began with 58 observations, but one of the [counties]{style="color:red"} had 0 ninth graders that took the FITNESSGRAM test and thus was removed from the dataset.
+
+# 5. Bivariate Analyses
+
+#### Does average temperature affect fitness levels?
+
+```{r, echo=FALSE}
+# Scatterplot for temp vs. passing rate
+ggplot(allData, aes(x=`Avg Temp`, y=Percent,col=wetCounty)) + geom_point() + theme_classic() + labs(title="Average Temperature vs. Passing Rate", x="Average Temperature", y="Passing Rate", color="Higher than avg. Rainfall?")
+```
+
+With r equal to `r round(cor(allData[["Avg Temp"]], allData$Percent),3)`, there does not appear to be a relationship between average temperature of a county and the fitness level of its students. However, we see a possible relationship between temperature and rainfall.
+
+#### Does precipitation levels affect fitness levels?
+
+```{r, echo=FALSE}
+# Scatterplot for precipitation vs passing rate
+ggplot(allData, aes(x=Precipitation, y=Percent, col=coldCounty)) + geom_point() + theme_classic() + labs(title="Precipitation vs. Passing Rate",x="Precipitation (in.)", y=("Passing Rate"),col="Lower than avg. Temperature?")
+```
+
+Again, with r equal to only `r round(cor(allData$Precipitation, allData$Percent),3)`, there does not appear to be a relationship between total precipitation of a county and the fitness level of students. We still see the relationship between temperature and rainfall though, so let's take a closer look at that.
+
+#### Do counties with more precipitation tend to be lower temperature?
+
+```{r, echo=FALSE}
+# Double bar chart for precipitation vs temperature
+ggplot(allData, aes(x=wetCounty, col=wetCounty, fill=wetCounty)) + geom_bar() + facet_wrap(~coldCounty, labeller=labeller(coldCounty=c(`FALSE`="Warm", `TRUE`="Cold"))) + theme_classic() + labs(title="Precipitation vs. Temperature", x="More rain than average?")  + theme(legend.position = "none")
+```
+
+It appears the pattern was indeed true. Around `r 100*round(sum((!allData$wetCounty)&(!allData$coldCounty))/sum(!allData$wetCounty),3)`% of dry counties had warmer temperatures than average, while only around `r 100*round(sum((allData$wetCounty)&(!allData$coldCounty))/sum(allData$wetCounty),3)`% of wet counties had warmer temperatures than average. It seems in California, the warmer counties are also drier.
+
+#### Is grade size correlated to fitness levels?
+
+```{r, echo=FALSE}
+# Scatterplot for grade size vs pass rate
+ggplot(allData, aes(x=`Denominator`, y=Percent, col=`Grade Lev`)) + geom_point() + theme_classic() + labs(title="Grade Size vs. Passing Rate", x="Grade Size", y="Passing Rate",col="Grade Level")
+```
+
+With r equal to `r round(cor(allData$Denominator, allData$Percent),3)`, no relationship is ilkely between the size of the grade and the fitness level of students. However, yet again we see another possible pattern between grade level and passing rates. Let's also look at this closer.
+
+#### Is there a difference in fitness levels between grade levels?
+
+```{r, echo=FALSE}
+# Boxplot for grade level vs pass rates
+ggplot(allData, aes(y=`Grade Lev`, x=Percent, col=`Grade Lev`)) + geom_boxplot(fill=c("pink", "lightgreen", "lightblue")) + theme_classic() + labs(title="Grade Level Passing Rates", x="Percent Passing Rate", y="Grade Level",col="Grade Level")
+```
+
+```{r, include=FALSE}
+# This is just so I know the numbers to put in writing below. Because the variable name has a space, I couldn't figure out how to make it an inline code chunk
+median(allData$Percent[allData$`Grade Lev`=="Grade 9"])
+median(allData$Percent[allData$`Grade Lev`=="Grade 7"])
+median(allData$Percent[allData$`Grade Lev`=="Grade 5"])
+```
+
+The median passing rate for 9th graders was 36.8%, for 7th graders it was 34.225%, and for 5th graders it was 30.54%. This shows that older students are on average more phyiscally fit than younger students.
+
+# 6. Choice Elements
+
+I used [A.]{style="color:blue"} In-line codes for displaying statistical results in both univariate and bivariate analysis sections. [B.]{style="color:blue"} hyperlinks were included in the introduction and link to my data sources. [C.]{style="color:blue"} I changed the font size and color of the caption of the photo, as well as the color for many variable names and choice element lists here. [D.]{style="color:blue"} a table of contents is present in the .html knit. [E.]{style="color:blue"} I combined my weather and fitness score dataset, as described in Data Preparation. [F.]{style="color:blue"} wetCounty and coldCounty were created (and talked about in "Create categorical variables for analysis"). [G.]{style="color:blue"} I had to parse strings and trim the word "County" off of every value in the original weather dataset to help me merge the two datasets.
+
+# 7. Conclusion
+
+After analysis, it appears that there in the 2018-2019 school year, there was no relationship between county average [temperature]{style="color:red"}/total [precipitation]{style="color:red"} during the school year and physical [fitness levels]{style="color:red"} of students in California. However, it appears that older students in California are generally more physically fit than younger students. An additional relationship found is that colder California counties tend to have more precipitation and vice versa.
+
+# 8. References
+
+Once again, thanks to [data.gov](https://catalog.data.gov/dataset/percentage-of-physically-fit-students-lghc-indicator-9b191?) and the [National Centers for Environmental Information](https://www.ncei.noaa.gov/access/monitoring/climate-at-a-glance/county/mapping) for providing the datasets used in my analysis. The image included is thanks to the [Texas Tech University Health Sciences Center](https://www.cooperinstitute.org/news/fitnessgram-pacer-test-remixes).
+
+Lastly, in-class notes and online sources including [stackoverflow](https://stackoverflow.com/questions), [chatGPT](https://chatgpt.com/) and [rfortherestofus](https://rfortherestofus.com/) were referenced to help debug and format code.
